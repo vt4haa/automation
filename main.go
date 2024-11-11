@@ -1,108 +1,136 @@
-// main.go
 package main
 
 import (
-	"automation/db"
+	"database/sql"
 	"encoding/json"
 	"fmt"
-	"github.com/dgrijalva/jwt-go" // Импортируем пакет jwt-go
-	"golang.org/x/crypto/bcrypt"
 	"log"
 	"net/http"
-	"time"
+	"strings"
+
+	_ "github.com/go-sql-driver/mysql"
+	"golang.org/x/crypto/bcrypt"
 )
 
-var secretKey = []byte("your-secret-key")
-
-// Структура для получения логина и пароля от клиента
+// Credentials структура для приема данных из запроса
 type Credentials struct {
 	Login    string `json:"login"`
-	Password string `json:"pass"`
+	Password string `json:"password"`
 }
 
-// Генерация JWT токена
-func generateJWT(userID int) (string, error) {
-	claims := jwt.MapClaims{
-		"user_id": userID,
-		"exp":     time.Now().Add(time.Hour * 24).Unix(), // токен будет действовать 24 часа
-	}
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	return token.SignedString(secretKey)
+// User структура для хранения данных пользователя из БД
+type User struct {
+	Login string `json:"login"`
+	Fio   string `json:"fio"`
+	Post  string `json:"post"` // Теперь здесь будет должность, извлеченная из positions
+	Pass  string `json:"-"`    // Не возвращаем пароль в ответ
 }
 
-// Проверка JWT токена
-func validateJWT(tokenStr string) (jwt.MapClaims, error) {
-	token, err := jwt.Parse(tokenStr, func(token *jwt.Token) (interface{}, error) {
-		return secretKey, nil
-	})
+// Подключение к базе данных
+func connectDB() (*sql.DB, error) {
+	dsn := "root:@tcp(127.0.0.1:3306)/autocast" // Замените yourdbname на имя вашей базы данных
+	db, err := sql.Open("mysql", dsn)
 	if err != nil {
 		return nil, err
 	}
-	if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
-		return claims, nil
-	}
-	return nil, fmt.Errorf("invalid token")
+	return db, nil
 }
 
-// Проверка пароля с хешем
-func checkPasswordHash(pass, hash string) bool {
-	err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(pass))
+// Функция для проверки хеша пароля
+func checkPasswordHash(password, hash string) bool {
+	err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(password))
 	return err == nil
 }
 
+// Функция для создания bcrypt-хэша пароля
+func hashPassword(password string) (string, error) {
+	bytes, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	return string(bytes), err
+}
+
+// Обработчик авторизации
 func loginHandler(w http.ResponseWriter, r *http.Request) {
 	var creds Credentials
-	if err := json.NewDecoder(r.Body).Decode(&creds); err != nil {
+
+	// Декодируем тело запроса в структуру Credentials
+	err := json.NewDecoder(r.Body).Decode(&creds)
+	if err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
-	// Получаем пользователя из базы данных
-	user, err := db.GetUserByLogin(creds.Login)
+	// Подключаемся к базе данных
+	db, err := connectDB()
 	if err != nil {
+		log.Fatal(err)
+		http.Error(w, "Database connection error", http.StatusInternalServerError)
+		return
+	}
+	defer db.Close()
+
+	// Ищем пользователя в базе данных по логину
+	var user User
+	var postID int
+	err = db.QueryRow("SELECT login, fio, post, pass FROM workers WHERE login = ?", creds.Login).Scan(&user.Login, &user.Fio, &postID, &user.Pass)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			http.Error(w, "Invalid credentials", http.StatusUnauthorized)
+		} else {
+			http.Error(w, "Database error", http.StatusInternalServerError)
+		}
+		return
+	}
+
+	// Получаем название должности из таблицы positions
+	var postName string
+	err = db.QueryRow("SELECT name FROM positions WHERE id = ?", postID).Scan(&postName)
+	if err != nil {
+		http.Error(w, "Database error while retrieving position", http.StatusInternalServerError)
+		return
+	}
+
+	// Устанавливаем полученную должность в поле post
+	user.Post = postName
+
+	// Проверяем, является ли пароль хэшированным
+	if !strings.HasPrefix(user.Pass, "$2a$") {
+		fmt.Println("Password is not hashed; hashing and updating the database.")
+		hashedPassword, err := hashPassword(user.Pass)
+		if err != nil {
+			http.Error(w, "Error hashing password", http.StatusInternalServerError)
+			return
+		}
+
+		// Обновляем пароль в базе данных на хэшированный
+		_, err = db.Exec("UPDATE workers SET pass = ? WHERE login = ?", hashedPassword, user.Login)
+		if err != nil {
+			http.Error(w, "Database update error", http.StatusInternalServerError)
+			return
+		}
+		user.Pass = hashedPassword
+	}
+
+	// Проверяем пароль
+	fmt.Println("Login from request:", creds.Login)
+	fmt.Println("Password from request:", creds.Password)
+	fmt.Println("Hashed password from DB:", user.Pass)
+
+	if !checkPasswordHash(creds.Password, user.Pass) {
 		http.Error(w, "Invalid credentials", http.StatusUnauthorized)
 		return
 	}
 
-	fmt.Println("User found in DB:", user.Login)
-
-	// Проверка пароля
-	if !checkPasswordHash(creds.Password, user.Password) {
-		fmt.Println("Password check failed")
-		http.Error(w, "Invalid credentials", http.StatusUnauthorized)
-		return
-	}
-
-	fmt.Println("Password check passed")
-
-	// Генерация токена
-	token, err := generateJWT(user.ID)
-	if err != nil {
-		fmt.Println("Error generating token:", err)
-		http.Error(w, "Error generating token", http.StatusInternalServerError)
-		return
-	}
-
-	fmt.Println("Generated token:", token)
-
-	response := map[string]string{"token": token}
+	// Успешная авторизация: отправляем данные пользователя в JSON
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(response)
+	err = json.NewEncoder(w).Encode(user)
+	if err != nil {
+		http.Error(w, "Error encoding user data", http.StatusInternalServerError)
+		return
+	}
 }
 
 func main() {
-	// Инициализация подключения к базе данных
-	_, err := db.InitDB()
-	if err != nil {
-		log.Fatalf("Error initializing database: %v", err)
-	}
-
-	// Обработчики маршрутов
 	http.HandleFunc("/login", loginHandler)
-
-	fmt.Println("Server started at :8080")
-	if err := http.ListenAndServe(":8080", nil); err != nil {
-		fmt.Println("Error starting server:", err)
-	}
+	fmt.Println("Server is running on port 8080...")
+	log.Fatal(http.ListenAndServe(":8080", nil))
 }
