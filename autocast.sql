@@ -3,7 +3,7 @@
 -- https://www.phpmyadmin.net/
 --
 -- Хост: 127.0.0.1:3306
--- Время создания: Ноя 06 2024 г., 11:44
+-- Время создания: Ноя 11 2024 г., 11:29
 -- Версия сервера: 5.7.36
 -- Версия PHP: 7.4.26
 
@@ -220,8 +220,8 @@ CREATE TABLE IF NOT EXISTS `workers` (
 --
 
 INSERT INTO `workers` (`id`, `fio`, `post`, `login`, `pass`) VALUES
-(1, 'Michael Johnson', 1, 'michael_j', 'pass123'),
-(2, 'Susan Green', 2, 'susan_g', 'password456');
+(1, 'Michael Johnson', 1, 'michael_j', '$2a$10$JDTdQwti0QhmtSLqDiNYHui/.8GDBaJ7hWFoY2ORNJXdj2GSca5Bm'),
+(2, 'Susan Green', 2, 'susan_g', '$2a$10$xCg2I8igrx7vzD21zonjMeYx/y1a9BZ9KNgYqhuYJjFbb05LQ3T5K');
 
 --
 -- Ограничения внешнего ключа сохраненных таблиц
