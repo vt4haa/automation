@@ -3,7 +3,7 @@
 -- https://www.phpmyadmin.net/
 --
 -- Хост: 127.0.0.1:3306
--- Время создания: Ноя 11 2024 г., 11:29
+-- Время создания: Ноя 27 2024 г., 17:02
 -- Версия сервера: 5.7.36
 -- Версия PHP: 7.4.26
 
@@ -181,7 +181,7 @@ CREATE TABLE IF NOT EXISTS `product` (
   `photo` varchar(255) DEFAULT NULL,
   `idCategories` int(11) DEFAULT NULL,
   `idBrands` int(11) DEFAULT NULL,
-  `quality` int(11) DEFAULT NULL,
+  `stock` int(11) NOT NULL,
   `price` int(11) DEFAULT NULL,
   PRIMARY KEY (`id`),
   KEY `idCategories` (`idCategories`),
@@ -192,11 +192,41 @@ CREATE TABLE IF NOT EXISTS `product` (
 -- Дамп данных таблицы `product`
 --
 
-INSERT INTO `product` (`id`, `name`, `photo`, `idCategories`, `idBrands`, `quality`, `price`) VALUES
+INSERT INTO `product` (`id`, `name`, `photo`, `idCategories`, `idBrands`, `stock`, `price`) VALUES
 (1, 'iPhone 14', 'iphone14.jpg', 1, 2, 100, 999),
 (2, 'Samsung Galaxy S21', 'galaxy_s21.jpg', 1, 1, 50, 799),
 (3, 'Sony Bravia 55\"', 'bravia55.jpg', 3, 3, 20, 1200),
 (4, 'LG Refrigerator', 'lg_fridge.jpg', 4, 4, 10, 1500);
+
+-- --------------------------------------------------------
+
+--
+-- Структура таблицы `purchases`
+--
+
+DROP TABLE IF EXISTS `purchases`;
+CREATE TABLE IF NOT EXISTS `purchases` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `user_id` int(11) NOT NULL,
+  `product_id` int(11) NOT NULL,
+  `quantity` int(11) NOT NULL,
+  `purchase_date` datetime NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `user_id` (`user_id`),
+  KEY `product_id` (`product_id`)
+) ENGINE=MyISAM AUTO_INCREMENT=7 DEFAULT CHARSET=utf8;
+
+--
+-- Дамп данных таблицы `purchases`
+--
+
+INSERT INTO `purchases` (`id`, `user_id`, `product_id`, `quantity`, `purchase_date`) VALUES
+(1, 1, 1, 2, '2024-11-01 10:30:00'),
+(2, 1, 2, 1, '2024-11-02 15:45:00'),
+(3, 2, 1, 3, '2024-11-03 11:20:00'),
+(4, 2, 3, 1, '2024-11-05 14:50:00'),
+(5, 3, 2, 5, '2024-11-10 09:00:00'),
+(6, 1, 3, 2, '2024-11-11 16:30:00');
 
 -- --------------------------------------------------------
 
