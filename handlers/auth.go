@@ -28,24 +28,13 @@ func LoginHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Получение данных пользователя
 	var user models.User
-	var postID int
-	err = dbConn.QueryRow("SELECT login, fio, post, pass FROM workers WHERE login = ?", creds.Login).
-		Scan(&user.Login, &user.Fio, &postID, &user.Pass)
+	err = dbConn.QueryRow("SELECT workers.id, workers.login, workers.fio, positions.name as post, workers.pass FROM workers JOIN positions on workers.post = positions. id WHERE login = ?", creds.Login).Scan(&user.Id, &user.Login, &user.Fio, &user.Post, &user.Pass)
 	if err != nil {
 		http.Error(w, "Invalid credentials", http.StatusUnauthorized)
 		return
 	}
 
 	// Получение названия должности
-	var postName string
-	err = dbConn.QueryRow("SELECT name FROM positions WHERE id = ?", postID).Scan(&postName)
-	if err != nil {
-		http.Error(w, "Database error while retrieving position", http.StatusInternalServerError)
-		return
-	}
-
-	// Установка должности в структуру пользователя
-	user.Post = postName
 
 	// Проверка, является ли пароль хэшированным
 	if !db.IsPasswordHashed(user.Pass) {

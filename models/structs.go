@@ -6,6 +6,7 @@ type Credentials struct {
 }
 
 type User struct {
+	Id    int    `json:"Id"`
 	Login string `json:"login"`
 	Fio   string `json:"fio"`
 	Post  string `json:"post"`
