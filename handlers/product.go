@@ -2,72 +2,83 @@ package handlers
 
 import (
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
 )
 
+// AddProductHandler обрабатывает загрузку файла
 func AddProductHandler(w http.ResponseWriter, r *http.Request) {
-	// Парсим форму
-	err := r.ParseMultipartForm(10 << 20) // Ограничение на размер до 10 MB
-	if err != nil {
-		log.Println("Error parsing form:", err)
-		http.Error(w, "Unable to parse form", http.StatusBadRequest)
+	// Разрешаем только метод POST
+	if r.Method != http.MethodPost {
+		http.Error(w, "Метод не поддерживается", http.StatusMethodNotAllowed)
 		return
 	}
-	log.Println("Form parsed successfully")
 
-	// Получаем файл
-	file, fileHeader, err := r.FormFile("image")
+	// Ограничиваем размер данных формы
+	err := r.ParseMultipartForm(32 << 20) // Ограничение на 32 MB
 	if err != nil {
-		log.Println("Error retrieving file:", err)
-		http.Error(w, "Error retrieving file", http.StatusBadRequest)
+		http.Error(w, "Ошибка при разборе формы", http.StatusBadRequest)
+		log.Printf("Ошибка разбора формы: %v\n", err)
+		return
+	}
+
+	// Получаем файл из формы
+	file, fileHeader, err := r.FormFile("photo")
+	if err != nil {
+		http.Error(w, "Ошибка получения файла. Проверьте ключ 'photo'", http.StatusBadRequest)
+		log.Printf("Ошибка получения файла: %v\n", err)
 		return
 	}
 	defer file.Close()
 
-	if fileHeader == nil {
-		log.Println("No file header found")
-		http.Error(w, "No file uploaded", http.StatusBadRequest)
+	// Проверяем наличие имени файла
+	if fileHeader.Filename == "" {
+		http.Error(w, "Имя файла не указано", http.StatusBadRequest)
+		log.Println("Имя файла отсутствует в запросе")
 		return
 	}
 
-	// Сохраняем файл
+	// Создаем папку для загрузки, если её нет
 	uploadDir := "./uploads"
-	if _, err := os.Stat(uploadDir); os.IsNotExist(err) {
-		if mkdirErr := os.Mkdir(uploadDir, os.ModePerm); mkdirErr != nil {
-			log.Println("Error creating upload directory:", mkdirErr)
-			http.Error(w, "Unable to create upload directory", http.StatusInternalServerError)
-			return
-		}
+	err = os.MkdirAll(uploadDir, os.ModePerm)
+	if err != nil {
+		http.Error(w, "Ошибка создания директории для загрузки", http.StatusInternalServerError)
+		log.Printf("Ошибка создания директории: %v\n", err)
+		return
 	}
 
+	// Путь для сохранения файла
 	filePath := filepath.Join(uploadDir, fileHeader.Filename)
-	dst, err := os.Create(filePath)
+
+	// Проверяем, не существует ли файл уже
+	if _, err := os.Stat(filePath); err == nil {
+		http.Error(w, "Файл с таким именем уже существует", http.StatusConflict)
+		log.Printf("Файл уже существует: %s\n", filePath)
+		return
+	}
+
+	// Создаем файл для записи
+	outFile, err := os.Create(filePath)
 	if err != nil {
-		log.Println("Error saving file:", err)
-		http.Error(w, "Error saving file", http.StatusInternalServerError)
+		http.Error(w, "Ошибка создания файла", http.StatusInternalServerError)
+		log.Printf("Ошибка создания файла: %v\n", err)
 		return
 	}
-	defer dst.Close()
+	defer outFile.Close()
 
-	_, err = file.Seek(0, 0) // Возвращаемся к началу файла
+	// Копируем содержимое загруженного файла в файл на сервере
+	_, err = io.Copy(outFile, file)
 	if err != nil {
-		log.Println("Error seeking file:", err)
-		http.Error(w, "Error processing file", http.StatusInternalServerError)
+		http.Error(w, "Ошибка копирования содержимого файла", http.StatusInternalServerError)
+		log.Printf("Ошибка копирования файла: %v\n", err)
 		return
 	}
 
-	if _, err := dst.ReadFrom(file); err != nil {
-		log.Println("Error writing to file:", err)
-		http.Error(w, "Error writing file to disk", http.StatusInternalServerError)
-		return
-	}
-
-	log.Printf("File uploaded successfully: %s", filePath)
-
-	// Ответ на запрос
+	// Успешный ответ
 	w.WriteHeader(http.StatusOK)
-	fmt.Fprintf(w, "File uploaded successfully: %s", filePath)
+	log.Printf("Файл успешно загружен: %s\n", filePath)
+	fmt.Fprintf(w, "Файл успешно загружен: %s", filePath)
 }
