@@ -3,82 +3,105 @@ package handlers
 import (
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"os"
-	"path/filepath"
+	"strconv"
+
+	"automation/db"
 )
 
-// AddProductHandler обрабатывает загрузку файла
-func AddProductHandler(w http.ResponseWriter, r *http.Request) {
-	// Разрешаем только метод POST
-	if r.Method != http.MethodPost {
-		http.Error(w, "Метод не поддерживается", http.StatusMethodNotAllowed)
+func AddProductHandler(res http.ResponseWriter, req *http.Request) {
+	var (
+		status int
+		err    error
+	)
+
+	defer func() {
+		if err != nil {
+			http.Error(res, err.Error(), status)
+		}
+	}()
+
+	// Parse the form data with file upload
+	if err = req.ParseMultipartForm(32 << 20); err != nil {
+		status = http.StatusInternalServerError
+		return
+	}
+	fmt.Println("Form parsed successfully")
+
+	// Get the product name, price, and file from the form
+	name := req.FormValue("name")
+	priceStr := req.FormValue("price")
+
+	if name == "" {
+		err = fmt.Errorf("Product name is required")
+		status = http.StatusBadRequest
 		return
 	}
 
-	// Ограничиваем размер данных формы
-	err := r.ParseMultipartForm(32 << 20) // Ограничение на 32 MB
-	if err != nil {
-		http.Error(w, "Ошибка при разборе формы", http.StatusBadRequest)
-		log.Printf("Ошибка разбора формы: %v\n", err)
+	var price float64
+	if priceStr != "" {
+		price, err = strconv.ParseFloat(priceStr, 64)
+		if err != nil {
+			err = fmt.Errorf("Invalid price format")
+			status = http.StatusBadRequest
+			return
+		}
+	} else {
+		err = fmt.Errorf("Price is required")
+		status = http.StatusBadRequest
 		return
 	}
 
-	// Получаем файл из формы
-	file, fileHeader, err := r.FormFile("photo")
+	// Get the uploaded file
+	file, fileHeader, err := req.FormFile("photo")
 	if err != nil {
-		http.Error(w, "Ошибка получения файла. Проверьте ключ 'photo'", http.StatusBadRequest)
-		log.Printf("Ошибка получения файла: %v\n", err)
+		err = fmt.Errorf("Error retrieving file: %v", err)
+		status = http.StatusInternalServerError
 		return
 	}
 	defer file.Close()
 
-	// Проверяем наличие имени файла
-	if fileHeader.Filename == "" {
-		http.Error(w, "Имя файла не указано", http.StatusBadRequest)
-		log.Println("Имя файла отсутствует в запросе")
-		return
+	// Save the file to disk
+	uploadDir := "./uploads/"
+	if _, err := os.Stat(uploadDir); os.IsNotExist(err) {
+		os.Mkdir(uploadDir, os.ModePerm)
 	}
 
-	// Создаем папку для загрузки, если её нет
-	uploadDir := "./uploads"
-	err = os.MkdirAll(uploadDir, os.ModePerm)
+	filePath := uploadDir + fileHeader.Filename
+	outfile, err := os.Create(filePath)
 	if err != nil {
-		http.Error(w, "Ошибка создания директории для загрузки", http.StatusInternalServerError)
-		log.Printf("Ошибка создания директории: %v\n", err)
+		err = fmt.Errorf("Error saving file: %v", err)
+		status = http.StatusInternalServerError
 		return
 	}
+	defer outfile.Close()
 
-	// Путь для сохранения файла
-	filePath := filepath.Join(uploadDir, fileHeader.Filename)
-
-	// Проверяем, не существует ли файл уже
-	if _, err := os.Stat(filePath); err == nil {
-		http.Error(w, "Файл с таким именем уже существует", http.StatusConflict)
-		log.Printf("Файл уже существует: %s\n", filePath)
-		return
-	}
-
-	// Создаем файл для записи
-	outFile, err := os.Create(filePath)
+	_, err = io.Copy(outfile, file)
 	if err != nil {
-		http.Error(w, "Ошибка создания файла", http.StatusInternalServerError)
-		log.Printf("Ошибка создания файла: %v\n", err)
+		err = fmt.Errorf("Error copying file: %v", err)
+		status = http.StatusInternalServerError
 		return
 	}
-	defer outFile.Close()
+	fmt.Printf("File successfully uploaded: %s\n", filePath)
 
-	// Копируем содержимое загруженного файла в файл на сервере
-	_, err = io.Copy(outFile, file)
+	// Save product data in the database
+	dbConn, err := db.ConnectDB()
 	if err != nil {
-		http.Error(w, "Ошибка копирования содержимого файла", http.StatusInternalServerError)
-		log.Printf("Ошибка копирования файла: %v\n", err)
+		err = fmt.Errorf("Database connection error: %v", err)
+		status = http.StatusInternalServerError
+		return
+	}
+	defer dbConn.Close()
+
+	// Insert the product into the database
+	_, err = dbConn.Exec("INSERT INTO product (name, price, photo) VALUES (?, ?, ?)", name, price, filePath)
+	if err != nil {
+		err = fmt.Errorf("Error inserting product into database: %v", err)
+		status = http.StatusInternalServerError
 		return
 	}
 
-	// Успешный ответ
-	w.WriteHeader(http.StatusOK)
-	log.Printf("Файл успешно загружен: %s\n", filePath)
-	fmt.Fprintf(w, "Файл успешно загружен: %s", filePath)
+	res.WriteHeader(http.StatusOK)
+	res.Write([]byte("Product added successfully"))
 }
