@@ -30,3 +30,10 @@ type Client struct {
 	Name    string `json:"name"`
 	Contact string `json:"contact"` // Заменено на поле contact
 }
+type Worker struct {
+	ID       int    `json:"id"`
+	Name     string `json:"name"`
+	Position string `json:"position"`
+	Login    string `json:"login"`
+	Password string `json:"password"`
+}

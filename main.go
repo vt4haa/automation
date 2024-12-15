@@ -7,6 +7,7 @@ import (
 )
 
 func main() {
+	http.HandleFunc("/add-worker", handlers.AddWorkerHandler)
 	http.HandleFunc("/login", handlers.LoginHandler)
 	http.HandleFunc("/add-product", handlers.AddProductHandler)
 	http.HandleFunc("/purchase-history", handlers.PurchaseHistoryHandler)
